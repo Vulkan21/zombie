@@ -12,49 +12,74 @@ app.get("/login", (req, res) => {
 
 // /zombie/1234
 app.get("/zombie/:num", async (req, res) => {
-  return handleZombie(req.params.num, res);
+  res.redirect(302, `/zombie?${req.params.num}`);
 });
 
-// /zombie?num=1234  и на всякий случай /zombie?1234
+// /zombie?1234  и /zombie?num=1234
 app.get("/zombie", async (req, res) => {
-  const num = req.query.num ?? Object.keys(req.query)[0];
-  return handleZombie(num, res);
-});
-
-async function handleZombie(num, res) {
-  if (!num || !/^\d+$/.test(String(num))) {
-    res.status(400).type("text/plain").send("Bad number parameter");
-    return;
-  }
-
-  const url = `https://kodaktor.ru/g/d7290da?${num}`;
-
-  let browser;
   try {
-    browser = await chromium.launch({
+    let num = null;
+
+    // /zombie?num=1234
+    if (req.query.num) num = String(req.query.num);
+
+    // /zombie?1234  (ключ запроса = "1234")
+    if (!num) {
+      const keys = Object.keys(req.query);
+      if (keys.length) num = String(keys[0]);
+    }
+
+    if (!num || !/^\d+$/.test(num)) {
+      return res.status(400).type("text/plain").send("Bad number parameter");
+    }
+
+    const url = `https://kodaktor.ru/g/d7290da?${num}`;
+
+    const browser = await chromium.launch({
       headless: true,
+      // в docker-playwright sandbox обычно ок, но пусть будет безопаснее
       args: ["--no-sandbox"]
     });
 
     const page = await browser.newPage();
     await page.goto(url, { waitUntil: "domcontentloaded" });
 
-    // Если кнопка одна — кликаем первую кнопку.
-    // Если на странице конкретный селектор — можно заменить на него.
-    await page.click("button");
+    // Надежный клик: пробуем разные варианты
+    const tryClick = async (selector) => {
+      const el = await page.$(selector);
+      if (el) {
+        await el.click();
+        return true;
+      }
+      return false;
+    };
 
-    // ждём, чтобы заголовок успел поменяться после клика
-    await page.waitForTimeout(150);
+    let clicked =
+      (await tryClick("button")) ||
+      (await tryClick("input[type=button]")) ||
+      (await tryClick("input[type=submit]"));
+
+    if (!clicked) {
+      // последний шанс: клик по любому элементу с onclick
+      const anyOnclick = await page.$("[onclick]");
+      if (anyOnclick) {
+        await anyOnclick.click();
+        clicked = true;
+      }
+    }
+
+    if (!clicked) throw new Error("No clickable control found");
+
+    // ждём обновления title
+    await page.waitForTimeout(300);
 
     const title = await page.title();
+    await browser.close();
+
     res.type("text/plain").send(title);
   } catch (e) {
-    res.status(500).type("text/plain").send(`Error: ${e.message}`);
-  } finally {
-    if (browser) await browser.close();
+    res.status(500).type("text/plain").send("ERR: " + e.message);
   }
-}
-
-app.listen(PORT, () => {
-  console.log(`Listening on ${PORT}`);
 });
+
+app.listen(PORT, () => console.log("Listening on", PORT));
