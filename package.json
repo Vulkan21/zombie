@@ -1,0 +1,14 @@
+{
+  "name": "kodaktor-zombie-render",
+  "version": "1.0.0",
+  "main": "index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node index.js",
+    "postinstall": "npx playwright install --with-deps chromium"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "playwright": "^1.49.0"
+  }
+}
